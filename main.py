@@ -46,46 +46,49 @@ GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{NOME_MOD
 print(f"🔥 Bot Pronto! Usando motor: {NOME_MODELO}")
 
 # --- 2. CÉREBRO (IA) ---
-def falar_com_google(entrada, tipo="texto"):
+def falar_com_google(entrada, tipo="texto", modo="tutor"):
     headers = {'Content-Type': 'application/json'}
     
-    # Prompt Visual (Beautification)
-    prompt_sistema = """
-    You are 'Daily Speaker', an English Tutor Bot.
-    
-    TASK:
-    1. Analyze the user's input (Text or Audio).
-    2. Ignore mistakes if they are just casual slang, focus on GRAMMAR and PRONUNCIATION errors.
-    
-    OUTPUT FORMAT (Strict markdown):
-    
-    📊 **Score: [0-100]/100**
-    [One sentence comment in English]
+    # --- SELEÇÃO DE PERSONALIDADE ---
+    if modo == "tutor":
+        # Modo Padrão: Corrige, dá nota e formata bonito
+        prompt_sistema = """
+        You are 'Daily Speaker', an English Tutor Bot.
+        TASK: Analyze the user's input (Text or Audio).
+        OUTPUT FORMAT (Strict markdown):
+        📊 **Score: [0-100]/100**
+        [One sentence comment]
+        📝 **Correction:**
+        "[Full sentence with ~~errors~~ and **corrections**]"
+        💡 **Dica:**
+        [Tip in Portuguese]
+        🗣️ **Practice:**
+        [Question in English]
+        """
+    elif modo == "simplificador":
+        # Novo Modo: Apenas reescreve simples
+        prompt_sistema = """
+        You are an expert Text Simplifier.
+        TASK: Rewrite the user's text into clear, simple English (Level A2).
+        RULES:
+        1. Use short sentences.
+        2. Use easy vocabulary.
+        3. Do NOT give feedback or scores. Just the text.
+        """
 
-    📝 **Correction:**
-    "[Full sentence with ~~errors~~ struck through and **corrections** bolded]"
-
-    💡 **Dica:**
-    [Tip in Portuguese about the main error]
-
-    🗣️ **Practice:**
-    [A question in English to continue conversation]
-    """
-
-    # Monta o pacote para o Google
+    # --- MONTAGEM DO PACOTE (Igual para todos) ---
     conteudo_usuario = []
     
     if tipo == "texto":
-        conteudo_usuario.append({"text": f"Student wrote: {entrada}"})
+        conteudo_usuario.append({"text": f"Input: {entrada}"})
     elif tipo == "audio":
-        # Para áudio, enviamos o arquivo codificado e uma instrução extra
         conteudo_usuario.append({
             "inline_data": {
                 "mime_type": "audio/ogg",
-                "data": entrada # Aqui entra o Base64 do áudio
+                "data": entrada
             }
         })
-        conteudo_usuario.append({"text": "Please listen to my pronunciation and grammar."})
+        conteudo_usuario.append({"text": "Listen to this."})
 
     payload = {
         "contents": [{
@@ -106,6 +109,18 @@ def falar_com_google(entrada, tipo="texto"):
 @bot.message_handler(commands=['start'])
 def welcome(message):
     bot.reply_to(message, "Hello! 🎧 I can now hear you.\nSend a voice message or text!")
+
+# Handler para o comando 'simplificar'
+@bot.message_handler(commands=['simplificar'])
+def comando_simplificar(message):
+    bot.reply_to(message, "Envie o texto em inglês que você quer simplificar.")
+    bot.register_next_step_handler(message, processar_simplificacao)
+
+def processar_simplificacao(message):
+    bot.send_chat_action(message.chat.id, 'typing')
+    texto_original = message.text
+    resposta = falar_com_google(texto_original, tipo="texto", modo="simplificador")
+    bot.reply_to(message, f"🔄 **Texto Simplificado:**\n\n{resposta}", parse_mode="Markdown")
 
 # Handler de ÁUDIO (Voz)
 @bot.message_handler(content_types=['voice'])
