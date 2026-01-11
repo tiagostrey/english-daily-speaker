@@ -16,6 +16,9 @@ if not TELEGRAM_TOKEN or not GOOGLE_API_KEY:
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
+# Memória Global (O Caderno)
+historico_usuarios = {}
+
 # --- 1. AUTO-DESCOBERTA DE MODELO ---
 def descobrir_melhor_modelo():
     print("🔍 Consultando modelos disponíveis...")
@@ -45,62 +48,71 @@ NOME_MODELO = descobrir_melhor_modelo()
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{NOME_MODELO}:generateContent?key={GOOGLE_API_KEY}"
 print(f"🔥 Bot Pronto! Usando motor: {NOME_MODELO}")
 
-# --- 2. CÉREBRO (IA) ---
-def falar_com_google(entrada, tipo="texto", modo="tutor"):
+# --- 2. CÉREBRO (IA) COM MEMÓRIA ---
+def falar_com_google(user_id, entrada, tipo="texto", modo="tutor"):
     headers = {'Content-Type': 'application/json'}
     
-    # --- SELEÇÃO DE PERSONALIDADE ---
+    # 1. Definição da Personalidade (Prompt)
     if modo == "tutor":
-        # Modo Padrão: Corrige, dá nota e formata bonito
-        prompt_sistema = """
-        You are 'Daily Speaker', an English Tutor Bot.
-        TASK: Analyze the user's input (Text or Audio).
-        OUTPUT FORMAT (Strict markdown):
-        📊 **Score: [0-100]/100**
-        [One sentence comment]
-        📝 **Correction:**
-        "[Full sentence with ~~errors~~ and **corrections**]"
-        💡 **Dica:**
-        [Tip in Portuguese]
-        🗣️ **Practice:**
-        [Question in English]
+        txt_instrucao = """
+        You are 'Daily Speaker', an English Tutor.
+        
+        CRITICAL RULES:
+        1. **Memory:** You remember everything the user says. Use the conversation history!
+        2. **Analysis:** Correct the grammar/spelling of the user's input.
+        3. **Interaction:** If the user asks a question (like "what is my name?"), ANSWER IT in the 'Practice' section.
+        
+        OUTPUT FORMAT:
+        📊 **Score: [0-100]**
+        📝 **Correction:** (Strike errors ~~like this~~ and **bold** corrections)
+        💡 **Tip:** (Short tip in Portuguese)
+        🗣️ **Practice/Chat:** (Answer the user's question OR ask a follow-up question to keep the chat going)
         """
     elif modo == "simplificador":
-        # Novo Modo: Apenas reescreve simples
-        prompt_sistema = """
-        You are an expert Text Simplifier.
-        TASK: Rewrite the user's text into clear, simple English (Level A2).
-        RULES:
-        1. Use short sentences.
-        2. Use easy vocabulary.
-        3. Do NOT give feedback or scores. Just the text.
-        """
+        txt_instrucao = "You are a Text Simplifier. Rewrite in simple A2 English. No analysis."
 
-    # --- MONTAGEM DO PACOTE (Igual para todos) ---
-    conteudo_usuario = []
-    
+    # 2. Inicializa o histórico do usuário se não existir
+    if user_id not in historico_usuarios:
+        historico_usuarios[user_id] = [
+            {"role": "user", "parts": [{"text": txt_instrucao}]},
+            {"role": "model", "parts": [{"text": "Understood. I am ready."}]}
+        ]
+
+    # 3. Prepara a nova mensagem do usuário
+    nova_parte = {}
     if tipo == "texto":
-        conteudo_usuario.append({"text": f"Input: {entrada}"})
+        nova_parte = {"text": entrada}
     elif tipo == "audio":
-        conteudo_usuario.append({
+        nova_parte = {
             "inline_data": {
                 "mime_type": "audio/ogg",
                 "data": entrada
             }
-        })
-        conteudo_usuario.append({"text": "Listen to this."})
+        }
+    
+    msg_usuario = {"role": "user", "parts": [nova_parte]}
 
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt_sistema}] + conteudo_usuario
-        }]
-    }
+    # 4. Monta o pacote de envio (Histórico + Mensagem Atual)
+    # Enviamos uma cópia das últimas 20 mensagens para não ficar pesado
+    contexto_envio = historico_usuarios[user_id][-20:] + [msg_usuario]
+
+    payload = {"contents": contexto_envio}
 
     try:
         response = requests.post(GEMINI_URL, headers=headers, data=json.dumps(payload))
+        
         if response.status_code != 200:
             return f"Erro Google ({response.status_code}): {response.text}"
-        return response.json()['candidates'][0]['content']['parts'][0]['text']
+        
+        # 5. Processa a resposta
+        resposta_ia = response.json()['candidates'][0]['content']['parts'][0]['text']
+        
+        # 6. Atualiza a Memória (Salva o par Pergunta/Resposta)
+        historico_usuarios[user_id].append(msg_usuario)
+        historico_usuarios[user_id].append({"role": "model", "parts": [{"text": resposta_ia}]})
+
+        return resposta_ia
+
     except Exception as e:
         return f"Erro de conexão: {e}"
 
@@ -119,7 +131,7 @@ def comando_simplificar(message):
 def processar_simplificacao(message):
     bot.send_chat_action(message.chat.id, 'typing')
     texto_original = message.text
-    resposta = falar_com_google(texto_original, tipo="texto", modo="simplificador")
+    resposta = falar_com_google(message.from_user.id, texto_original, tipo="texto", modo="simplificador")
     bot.reply_to(message, f"🔄 **Texto Simplificado:**\n\n{resposta}", parse_mode="Markdown")
 
 # Handler de ÁUDIO (Voz)
@@ -135,7 +147,7 @@ def receber_audio(message):
         audio_b64 = base64.b64encode(downloaded_file).decode('utf-8')
         
         # 3. Enviar para IA
-        resposta = falar_com_google(audio_b64, tipo="audio")
+        resposta = falar_com_google(message.from_user.id, audio_b64, tipo="audio")
         
         try: bot.reply_to(message, resposta, parse_mode="Markdown")
         except: bot.reply_to(message, resposta)
@@ -143,11 +155,21 @@ def receber_audio(message):
     except Exception as e:
         bot.reply_to(message, f"Erro ao processar áudio: {e}")
 
+# Handler para limpeza da memória
+@bot.message_handler(commands=['reset'])
+def resetar_memoria(message):
+    user_id = message.from_user.id
+    if user_id in historico_usuarios:
+        del historico_usuarios[user_id] # Apaga o histórico
+        bot.reply_to(message, "🧠 Memória apagada! Começamos do zero.")
+    else:
+        bot.reply_to(message, "Já estamos no zero!")
+
 # Handler de TEXTO
 @bot.message_handler(func=lambda m: True)
 def receber_texto(message):
     bot.send_chat_action(message.chat.id, 'typing')
-    resposta = falar_com_google(message.text, tipo="texto")
+    resposta = falar_com_google(message.from_user.id, message.text, tipo="texto")
     try: bot.reply_to(message, resposta, parse_mode="Markdown")
     except: bot.reply_to(message, resposta)
 
