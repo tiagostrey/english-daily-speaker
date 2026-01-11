@@ -172,7 +172,16 @@ def enviar_audio_resposta(chat_id, texto_markdown):
 
 @bot.message_handler(commands=['start'])
 def welcome(message):
-    bot.reply_to(message, "Hello! 🎧 I can now hear you.\nSend a voice message or text!")
+    # Texto de boas-vindas mais completo e informativo
+    texto_boas_vindas = (
+        "Hello! I am 'Daily Speaker', your AI English Tutor. 🇺🇸\n\n"
+        "🎧 **How to use:**\n"
+        "- Send **Text** or **Audio** to practice.\n"
+        "- Use **/simplificar** to rewrite complex texts.\n"
+        "- Use **/reset** to clear my memory and start a new topic.\n\n"
+        "Let's start! Send me a message."
+    )
+    bot.reply_to(message, texto_boas_vindas, parse_mode="Markdown")
 
 # Handler para o comando 'simplificar'
 @bot.message_handler(commands=['simplificar'])
@@ -220,15 +229,24 @@ def resetar_memoria(message):
     else:
         bot.reply_to(message, "Já estamos no zero!")
 
-# Handler de TEXTO
+# Handler de TEXTO (Genérico)
 @bot.message_handler(func=lambda m: True)
 def receber_texto(message):
+    user_id = message.from_user.id
+    
+    # VERIFICAÇÃO DE NOVO USUÁRIO
+    # Se o ID não estiver na memória, mandamos as instruções primeiro
+    if user_id not in historico_usuarios:
+        welcome(message) # Chama a função de boas-vindas
+        
+    # Depois, processa a mensagem normalmente
     bot.send_chat_action(message.chat.id, 'typing')
-    resposta = falar_com_google(message.from_user.id, message.text, tipo="texto")
+    
+    resposta = falar_com_google(user_id, message.text, tipo="texto")
+    
     try: bot.reply_to(message, resposta, parse_mode="Markdown")
     except: bot.reply_to(message, resposta)
 
-    # NOVO: Envia o áudio também!
     enviar_audio_resposta(message.chat.id, resposta)
 
 if __name__ == "__main__":
