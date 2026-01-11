@@ -1,3 +1,5 @@
+from gtts import gTTS
+import re
 import os
 import telebot
 import requests
@@ -116,6 +118,56 @@ def falar_com_google(user_id, entrada, tipo="texto", modo="tutor"):
     except Exception as e:
         return f"Erro de conexão: {e}"
 
+# --- FUNÇÃO AUXILIAR: TEXTO PARA ÁUDIO ---
+def enviar_audio_resposta(chat_id, texto_markdown):
+    try:
+        # 1. DEFINIR O ALVO (REGEX)
+        # r'' -> Indica string bruta (raw) para regex
+        # \*\* -> Procura dois asteriscos literais
+        # Practice.*: -> Procura a palavra Practice seguida de qualquer coisa (ex: /Chat) e dois pontos
+        # (.*) -> O GRUPO DE CAPTURA. Pega tudo o que vier depois disso até o fim.
+        # re.DOTALL -> Permite que o ponto (.) pegue também quebras de linha
+        padrao = r'\*\*Practice.*:\*\*(.*)'
+        
+        match = re.search(padrao, texto_markdown, re.DOTALL)
+
+        # 2. VERIFICAR SE ACHOU
+        if match:
+            # group(1) pega apenas o conteúdo capturado dentro dos parênteses (.*)
+            # ou seja, ignora o título "**Practice:**" e pega só a fala.
+            texto_para_falar = match.group(1)
+        else:
+            # Se não achar o padrão (ex: erro no prompt), não fala nada para não falar besteira.
+            print("⚠️ Não encontrei o trecho de Practice para ler.")
+            return
+
+        # 3. LIMPEZA (A VASSOURA)
+        # Remove markdown (*, _, ~)
+        texto_limpo = re.sub(r'[*_~]', '', texto_para_falar)
+        
+        # Remove emojis e caracteres estranhos (Deixa apenas letras, números e pontuação básica)
+        # [^\w\s,.:;?!] -> Significa "Tudo que NÃO for letra, espaço ou pontuação"
+        texto_limpo = re.sub(r'[^\w\s,.:;?!\'"]', '', texto_limpo)
+        
+        # Remove espaços extras que sobraram
+        texto_limpo = texto_limpo.strip()
+
+        print(f"🗣️ Falando apenas: {texto_limpo}")
+
+        # 4. GERAR O ÁUDIO (Se sobrou algum texto)
+        if texto_limpo:
+            tts = gTTS(text=texto_limpo, lang='en', slow=False)
+            nome_arquivo = f"audio_{chat_id}.ogg"
+            tts.save(nome_arquivo)
+            
+            with open(nome_arquivo, 'rb') as audio:
+                bot.send_voice(chat_id, audio)
+            
+            os.remove(nome_arquivo)
+
+    except Exception as e:
+        print(f"Erro no áudio: {e}")
+
 # --- 3. TELEGRAM HANDLERS ---
 
 @bot.message_handler(commands=['start'])
@@ -151,6 +203,9 @@ def receber_audio(message):
         
         try: bot.reply_to(message, resposta, parse_mode="Markdown")
         except: bot.reply_to(message, resposta)
+
+        # NOVO: Envia o áudio também!
+        enviar_audio_resposta(message.chat.id, resposta)
             
     except Exception as e:
         bot.reply_to(message, f"Erro ao processar áudio: {e}")
@@ -172,6 +227,9 @@ def receber_texto(message):
     resposta = falar_com_google(message.from_user.id, message.text, tipo="texto")
     try: bot.reply_to(message, resposta, parse_mode="Markdown")
     except: bot.reply_to(message, resposta)
+
+    # NOVO: Envia o áudio também!
+    enviar_audio_resposta(message.chat.id, resposta)
 
 if __name__ == "__main__":
     bot.infinity_polling()
