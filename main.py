@@ -113,6 +113,8 @@ def falar_com_google(user_id, entrada, tipo="texto", modo="tutor"):
         historico_usuarios[user_id].append(msg_usuario)
         historico_usuarios[user_id].append({"role": "model", "parts": [{"text": resposta_ia}]})
 
+        print(f'🤖 Tutor: {resposta_ia}')
+
         return resposta_ia
 
     except Exception as e:
@@ -233,7 +235,8 @@ def resetar_memoria(message):
 @bot.message_handler(func=lambda m: True)
 def receber_texto(message):
     user_id = message.from_user.id
-    
+    print(f'📩 {message.from_user.first_name}: {message.text}')
+
     # VERIFICAÇÃO DE NOVO USUÁRIO
     # Se o ID não estiver na memória, mandamos as instruções primeiro
     if user_id not in historico_usuarios:
