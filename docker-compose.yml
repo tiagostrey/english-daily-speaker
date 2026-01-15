@@ -1,0 +1,14 @@
+services:
+  bot-ingles:
+    build: .
+    container_name: bot-ingles
+    restart: always
+    # Configuração de DNS (para não ter erro de conexão igual tivemos antes)
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Mapeia o horário local para os logs ficarem certos
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
