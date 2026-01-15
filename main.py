@@ -113,8 +113,6 @@ def falar_com_google(user_id, entrada, tipo="texto", modo="tutor"):
         historico_usuarios[user_id].append(msg_usuario)
         historico_usuarios[user_id].append({"role": "model", "parts": [{"text": resposta_ia}]})
 
-        print(f'🤖 Tutor: {resposta_ia}')
-
         return resposta_ia
 
     except Exception as e:
@@ -154,7 +152,7 @@ def enviar_audio_resposta(chat_id, texto_markdown):
         # Remove espaços extras que sobraram
         texto_limpo = texto_limpo.strip()
 
-        print(f"🗣️ Falando apenas: {texto_limpo}")
+        print(f'🤖 Tutor: {texto_limpo}')
 
         # 4. GERAR O ÁUDIO (Se sobrou algum texto)
         if texto_limpo:
