@@ -129,6 +129,16 @@ def chamar_gemini(conteudo_parts: list, historico: list, system_prompt: str) -> 
     payload = {"contents": contexto}
     try:
         response = requests.post(GEMINI_URL, headers=headers, json=payload)
+        
+        # Fallback automático se modelo sobrecarregado
+        if response.status_code in [503, 429]:
+            fallbacks = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+            for modelo in fallbacks:
+                url_fallback = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GOOGLE_API_KEY}"
+                response = requests.post(url_fallback, headers=headers, json=payload)
+                if response.status_code == 200:
+                    break
+        
         if response.status_code != 200:
             return f"Erro Google ({response.status_code}): {response.text}"
         return response.json()['candidates'][0]['content']['parts'][0]['text']
