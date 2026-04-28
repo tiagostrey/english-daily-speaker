@@ -127,21 +127,19 @@ def chamar_gemini(conteudo_parts: list, historico: list, system_prompt: str) -> 
     ] + historico[-20:] + [{"role": "user", "parts": conteudo_parts}]
 
     payload = {"contents": contexto}
+    urls_tentar = [GEMINI_URL] + [
+        f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={GOOGLE_API_KEY}"
+        for m in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+        if m not in GEMINI_URL
+    ]
     try:
-        response = requests.post(GEMINI_URL, headers=headers, json=payload)
-        
-        # Fallback automático se modelo sobrecarregado
-        if response.status_code in [503, 429]:
-            fallbacks = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
-            for modelo in fallbacks:
-                url_fallback = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GOOGLE_API_KEY}"
-                response = requests.post(url_fallback, headers=headers, json=payload)
-                if response.status_code == 200:
-                    break
-        
-        if response.status_code != 200:
-            return f"Erro Google ({response.status_code}): {response.text}"
-        return response.json()['candidates'][0]['content']['parts'][0]['text']
+        for url in urls_tentar:
+            response = requests.post(url, headers=headers, json=payload)
+            if response.status_code == 200:
+                return response.json()['candidates'][0]['content']['parts'][0]['text']
+            if response.status_code not in [503, 429]:
+                return f"Erro Google ({response.status_code}): {response.text}"
+        return "Serviço temporariamente indisponível. Tente novamente em instantes."
     except Exception as e:
         return f"Erro de conexão: {e}"
 
@@ -499,7 +497,54 @@ def cmd_reset(message):
     bot.reply_to(message, "🧠 Histórico da conversa apagado! Contexto de longo prazo (nível, favoritos) mantido.")
 
 
-@bot.message_handler(content_types=['voice'])
+def detectar_intencao(texto: str) -> dict:
+    """Detecta se a mensagem é uma intenção específica sem usar comando /"""
+    texto_lower = texto.lower().strip()
+
+    # Intenção: música
+    padroes_musica = [
+        r'(?:quero estudar|estudar|aula sobre|me ensina|usar|aprender com)\s+(?:a música|a musica|música|musica)\s+(.+)',
+        r'(?:música|musica)\s+(.+?)\s+(?:do|da|de)\s+(.+)',
+        r'(?:serie favorita|serie|quero ver série|aula de série|aprender com)\s+(.+)',
+    ]
+
+    # Música: "quero estudar a música X do Y" ou "música X - Y"
+    match = re.search(r'(?:música|musica|song)[:\s]+(.+?)\s*[-–]\s*(.+)', texto_lower)
+    if match:
+        return {"tipo": "musica", "artista": match.group(2).strip(), "musica": match.group(1).strip()}
+
+    match = re.search(r'(?:quero estudar|estudar|aula|aprender com)\s+(?:a\s+)?(?:música|musica)\s+(.+?)\s+(?:do|da|de)\s+(.+)', texto_lower)
+    if match:
+        return {"tipo": "musica", "musica": match.group(1).strip(), "artista": match.group(2).strip()}
+
+    # Série: "série favorita X" ou "quero estudar a série X"
+    match = re.search(r'(?:série|serie|series)[:\s]+(.+)', texto_lower)
+    if match:
+        return {"tipo": "serie", "nome": match.group(1).strip()}
+
+    match = re.search(r'(?:quero estudar|estudar|aula|aprender com)\s+(?:a\s+)?(?:série|serie)\s+(.+)', texto_lower)
+    if match:
+        return {"tipo": "serie", "nome": match.group(1).strip()}
+
+    # Vocabulário
+    if any(p in texto_lower for p in ["palavra do dia", "palavra nova", "me dá uma palavra", "vocabulário", "vocabulario"]):
+        return {"tipo": "vocabulario"}
+
+    # Meu nível
+    if any(p in texto_lower for p in ["meu nível", "meu nivel", "qual meu nível", "qual meu nivel", "como estou"]):
+        return {"tipo": "meunivel"}
+
+    # Favoritos
+    if any(p in texto_lower for p in ["meus favoritos", "minhas músicas", "minhas series", "favoritos"]):
+        return {"tipo": "favoritos"}
+
+    # Reset
+    if any(p in texto_lower for p in ["apaga histórico", "apaga historico", "limpa histórico", "novo assunto"]):
+        return {"tipo": "reset"}
+
+    return {"tipo": "conversa"}
+
+
 def receber_audio(message):
     user_id = str(message.from_user.id)
     bot.send_chat_action(message.chat.id, 'typing')
@@ -528,6 +573,31 @@ def receber_texto(message):
         perfil["nome"] = message.from_user.first_name
         salvar_perfil(user_id, perfil)
         welcome(message)
+        return
+
+    # Detecção de intenção natural
+    intencao = detectar_intencao(message.text)
+
+    if intencao["tipo"] == "musica":
+        message.text = f"/musica {intencao['artista']} - {intencao['musica']}"
+        cmd_musica(message)
+        return
+    elif intencao["tipo"] == "serie":
+        message.text = f"/serie {intencao['nome']}"
+        cmd_serie(message)
+        return
+    elif intencao["tipo"] == "vocabulario":
+        cmd_vocabulario(message)
+        return
+    elif intencao["tipo"] == "meunivel":
+        cmd_meu_nivel(message)
+        return
+    elif intencao["tipo"] == "favoritos":
+        cmd_favoritos(message)
+        return
+    elif intencao["tipo"] == "reset":
+        cmd_reset(message)
+        return
 
     bot.send_chat_action(message.chat.id, 'typing')
     resposta = falar_com_ia(user_id, message.text, tipo="texto")
